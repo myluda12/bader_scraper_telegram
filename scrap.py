@@ -73,7 +73,7 @@ from telethon.tl.functions.messages import GetDialogsRequest
 from telethon.tl.types import InputPeerEmpty
 import csv
 
-# Replace these with your API credentials
+# Replace these with your actual API credentials
 api_id = 26935340  # Replace with your API ID
 api_hash = '5b00b55597cc61a30f7e05ae770836f1'  # Replace with your API Hash
 phone = '+212693360369'  # Replace with your phone number
@@ -139,7 +139,9 @@ with open(output_file, 'w', encoding='UTF-8', newline='') as f:
         name = f"{first_name} {last_name}".strip()
 
         # Ensure that both user id and access hash are valid
-        if user.id and user.access_hash:
+        if hasattr(user, 'id') and hasattr(user, 'access_hash'):
             writer.writerow([username, user.id, user.access_hash, name])
+        else:
+            print(f"Skipping user {username} due to missing id or access hash.")
 
 print(f'Members scraped successfully and saved to {output_file}.')
