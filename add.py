@@ -166,7 +166,18 @@ from telethon.errors import (
 from telethon.tl.types import InputPeerUser, InputPeerChannel
 from telethon.tl.functions.channels import InviteToChannelRequest
 
-# Your Telegram account credentials
+import asyncio
+import json
+import csv
+import traceback
+from telethon import TelegramClient
+from telethon.errors import (
+    FloodWaitError, UserPrivacyRestrictedError, ChannelInvalidError, UserIdInvalidError
+)
+from telethon.tl.types import InputPeerUser, InputPeerChannel
+from telethon.tl.functions.channels import InviteToChannelRequest
+
+# List of accounts
 accounts = [
     {'api_id': 123456, 'api_hash': 'your_api_hash1', 'phone': '+212700737262'},
     {'api_id': 654321, 'api_hash': 'your_api_hash2', 'phone': '+212693360369'}
@@ -178,16 +189,13 @@ def load_users_from_csv(filename='members.csv'):
     with open(filename, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            try:
-                if row['user id'] and row['access hash']:
-                    users.append({
-                        'id': int(row['user id']),
-                        'access_hash': int(row['access hash']),
-                        'username': row.get('username', ''),
-                        'name': row.get('name', '')
-                    })
-            except ValueError as e:
-                print(f"Skipping invalid row: {row}. Error: {e}")
+            if row['user id'] and row['access hash']:
+                users.append({
+                    'id': int(row['user id']),
+                    'access_hash': int(row['access hash']),
+                    'username': row.get('username', ''),
+                    'name': row.get('name', '')
+                })
     return users
 
 # Load or initialize progress tracking
@@ -217,6 +225,15 @@ async def login_accounts():
         clients.append(client)
     return clients
 
+# Ensure the client is connected and retry if disconnected
+async def ensure_connected(client, phone):
+    if not client.is_connected():
+        print(f"Reconnecting client for {phone}...")
+        await client.connect()
+        if not await client.is_user_authorized():
+            print(f"Client {phone} disconnected. Login again.")
+            raise ConnectionError(f"Cannot send requests with {phone}. Reconnect failed.")
+
 # Get group entity by name
 async def get_group_entity(client, group_name):
     async for dialog in client.iter_dialogs():
@@ -225,7 +242,7 @@ async def get_group_entity(client, group_name):
     raise ValueError(f"Group '{group_name}' not found.")
 
 # Invite users to a group
-async def invite_users(client, group, users, processed_users):
+async def invite_users(client, group, users, processed_users, phone):
     for user in users:
         if user['id'] in processed_users:
             print(f"Skipping {user['id']} (already processed).")
@@ -234,29 +251,29 @@ async def invite_users(client, group, users, processed_users):
         try:
             print(f"Adding {user['id']} ({user.get('username', None)}) to the group...")
             user_to_add = InputPeerUser(user['id'], user['access_hash'])
+            await ensure_connected(client, phone)
             await client(InviteToChannelRequest(group, [user_to_add]))
             print("User added successfully.")
             processed_users.add(user['id'])
             save_progress(processed_users)
             await asyncio.sleep(30)  # Avoid rate limits
 
-        except UserIdInvalidError:
-            print(f"Invalid user ID or access hash for user {user['id']}. Skipping...")
-            processed_users.add(user['id'])
-            save_progress(processed_users)
-
         except FloodWaitError as e:
             print(f"Flood wait error: Must wait {e.seconds} seconds. Switching accounts...")
-            return False  # Indicate flood limit hit
+            return False  # Signal to switch accounts
 
-        except UserPrivacyRestrictedError:
-            print(f"Privacy settings prevent adding user {user['id']}. Skipping...")
+        except (UserPrivacyRestrictedError, UserIdInvalidError) as e:
+            print(f"Skipping {user['id']} due to {e}.")
             processed_users.add(user['id'])
             save_progress(processed_users)
 
         except ChannelInvalidError:
-            print("Invalid channel. Re-fetching the group...")
-            return False  # Indicate channel issue
+            print("Invalid channel. Please verify the group.")
+            return False  # Indicate an issue with the group
+
+        except ConnectionError as e:
+            print(f"Error: {e}")
+            return False  # Handle disconnection and switch accounts
 
         except Exception as e:
             print(f"Unexpected error: {e}")
@@ -273,22 +290,25 @@ async def main():
 
     while True:
         for i, client in enumerate(clients):
-            print(f"Using account {i + 1}/{len(clients)}")
+            phone = accounts[i]['phone']
+            print(f"Using account {i + 1}/{len(clients)}: {phone}")
+
             try:
+                await ensure_connected(client, phone)
                 group = await get_group_entity(client, group_name)
-                success = await invite_users(client, group, users, processed_users)
+                success = await invite_users(client, group, users, processed_users, phone)
                 if success:
                     print("All users added successfully.")
                     return  # Exit if all users are added
 
             except Exception as e:
-                print(f"Error with account {accounts[i]['phone']}: {e}")
+                print(f"Error with account {phone}: {e}")
 
             finally:
                 await client.disconnect()
 
         print("All accounts hit limits. Sleeping for 1 hour...")
-        await asyncio.sleep(3600)  # Sleep before retrying
+        await asyncio.sleep(3000)  # Sleep before retrying
 
 # Run the script
 if __name__ == "__main__":
