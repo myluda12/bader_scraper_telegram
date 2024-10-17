@@ -155,69 +155,39 @@
 
 
 
-import asyncio
-from telethon import TelegramClient
-from telethon.tl.functions.messages import GetDialogsRequest
-from telethon.tl.types import InputPeerEmpty, InputPeerChannel, InputPeerUser
-from telethon.errors import (
-    PeerFloodError,
-    UserPrivacyRestrictedError,
-    FloodWaitError,
-    ChannelInvalidError,
-    UserIdInvalidError,
-)
-from telethon.tl.functions.channels import InviteToChannelRequest
 import csv
-import random
-import traceback
-import time
+import json
 import asyncio
-import random
 import traceback
 from telethon import TelegramClient
 from telethon.errors import (
-    FloodWaitError,
-    UserPrivacyRestrictedError,
-    UserIdInvalidError,
-    PeerFloodError,
-    ChannelInvalidError,
+    FloodWaitError, UserPrivacyRestrictedError, UserIdInvalidError, ChannelInvalidError
 )
+from telethon.tl.types import InputPeerUser, InputPeerChannel
 from telethon.tl.functions.channels import InviteToChannelRequest
-from telethon.tl.types import InputPeerUser
 
-
-
-
-# List of Telegram accounts with their API credentials
-import csv
-import asyncio
-import traceback
-from telethon import TelegramClient
-from telethon.tl.functions.channels import InviteToChannelRequest
-from telethon.tl.types import InputPeerChannel, InputPeerUser
-from telethon.errors import FloodWaitError, UserPrivacyRestrictedError, ChannelInvalidError
-
-# List of accounts and credentials
+# Your Telegram account credentials
 accounts = [
     {'api_id': 123456, 'api_hash': 'your_api_hash1', 'phone': '+212700737262'},
     {'api_id': 654321, 'api_hash': 'your_api_hash2', 'phone': '+212693360369'}
 ]
 
-
-# Load users from CSV
 # Load users from CSV
 def load_users_from_csv(filename='members.csv'):
     users = []
     with open(filename, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            if row['user id'] and row['access hash']:
-                users.append({
-                    'id': int(row['user id']),
-                    'access_hash': int(row['access hash']),
-                    'username': row.get('username', ''),
-                    'name': row.get('name', '')
-                })
+            try:
+                if row['user id'] and row['access hash']:
+                    users.append({
+                        'id': int(row['user id']),
+                        'access_hash': int(row['access hash']),
+                        'username': row.get('username', ''),
+                        'name': row.get('name', '')
+                    })
+            except ValueError as e:
+                print(f"Skipping invalid row: {row}. Error: {e}")
     return users
 
 # Load or initialize progress tracking
@@ -270,9 +240,14 @@ async def invite_users(client, group, users, processed_users):
             save_progress(processed_users)
             await asyncio.sleep(30)  # Avoid rate limits
 
+        except UserIdInvalidError:
+            print(f"Invalid user ID or access hash for user {user['id']}. Skipping...")
+            processed_users.add(user['id'])
+            save_progress(processed_users)
+
         except FloodWaitError as e:
             print(f"Flood wait error: Must wait {e.seconds} seconds. Switching accounts...")
-            return False  # Indicate that flood limit was hit
+            return False  # Indicate flood limit hit
 
         except UserPrivacyRestrictedError:
             print(f"Privacy settings prevent adding user {user['id']}. Skipping...")
